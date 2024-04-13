@@ -11,7 +11,7 @@ import tempfile
 
 app = FastAPI()
 
-MODEL = "gpt-3.5-turbo"
+MODEL = "gpt-4-turbo"
 
 
 class InputData(BaseModel):
@@ -20,31 +20,11 @@ class InputData(BaseModel):
 
 
 def get_diff(repo: Repo):
-    diff = repo.index.diff(None)
-    return diff
-
-
-TOOLS = {
-    "type": "function",
-    "function": {
-        "name": "write_file",
-        "description": "Writes to a file",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The original filename relative to the root of the repository",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The content to write to the file",
-                },
-            },
-            "required": ["path", "content"],
-        },
-    },
-}
+    diff = repo.index.diff(None, create_patch=True, unified=1000)
+    result = ""
+    for diff in diff.iter_change_type("M"):
+        result += str(diff)
+    return result
 
 
 SUPPORTED_TYPES = [".c", ".cpp", ".py", ".sh", ".md", ".html", ".txt"]
@@ -77,6 +57,28 @@ def upload_files(client, files, working_dir: Path):
 def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
     files = list(get_files(repo.head.commit.tree))
     openai_files = list(upload_files(client, files, working_dir))
+    TOOLS = {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Modifies a file in the repository by writing new content to it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "enum": files,
+                        "description": "The original filename relative to the root of the repository",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The new content to write to the file",
+                    },
+                },
+                "required": ["path", "content"],
+            },
+        },
+    }
 
     class EventHandler(AssistantEventHandler):
         # def on_message_done(self, message):
@@ -104,13 +106,14 @@ def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
             tool_call,
         ) -> None:
             if tool_call.type == "function":
-                arguments = json.loads(tool_call.function.arguments)
-                logger.debug(arguments)
-
-                self.write_file(
-                    arguments["path"],
-                    arguments["content"],
-                )
+                if tool_call.function.name == "write_file":
+                    logger.trace(tool_call.function.arguments)
+                    arguments = json.loads(tool_call.function.arguments)
+                    logger.debug(arguments)
+                    self.write_file(
+                        arguments["path"],
+                        arguments["content"],
+                    )
             return super().on_tool_call_done(tool_call)
 
         def on_tool_call_delta(self, delta, snapshot):
@@ -134,44 +137,76 @@ def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
     assistant = client.beta.assistants.create(
         name="tinygen",
         model=MODEL,
-        description="Modify the given files to fix the problem",
-        tools=[{"type": "code_interpreter"}, {"type": "retrieval"}, TOOLS],
+        instructions=f"Fix the issue specified by the user. Modify the following files: {files}.",
+        tools=[{"type": "code_interpreter"}, TOOLS],
         file_ids=[file.id for file in openai_files],
     )
-    thread = client.beta.threads.create(
+    try:
+
+        thread = client.beta.threads.create(
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
+        )
+        with client.beta.threads.runs.stream(
+            thread_id=thread.id, assistant_id=assistant.id, event_handler=EventHandler()
+        ) as stream:
+            stream.until_done()
+    finally:
+        client.beta.assistants.delete(assistant.id)
+        for file in openai_files:
+            client.files.delete(file.id)
+
+
+def is_change_good(change: str, prompt: str, client: OpenAI) -> bool:
+    if change == "":
+        return False
+    response = client.chat.completions.create(
+        model=MODEL,
+        response_format={"type": "json_object"},
         messages=[
             {
-                "role": "assistant",
-                "content": f"Modify the following files to fix the problem: {files}",
+                "role": "system",
+                "content": "Does the following change fix the issue? Output in JSON with the parameter is_change_good set to true or false.",
             },
-            {"role": "user", "content": "prompt:\n" + prompt},
+            {"role": "user", "content": f"Change: {change}"},
+            {"role": "user", "content": f"Prompt: {prompt}"},
         ],
     )
-    with client.beta.threads.runs.stream(
-        thread_id=thread.id, assistant_id=assistant.id, event_handler=EventHandler()
-    ) as stream:
-        stream.until_done()
+    logger.debug(response)
+    for message in response.choices:
+        content = json.loads(message.message.content)
+        if "is_change_good" in content:
+            return content["is_change_good"]
+    return False
+
+
+def reset_repo(repo: Repo):
+    repo.git.reset("--hard")
+    repo.git.clean("-fd")
 
 
 @app.post("/change")
 def change_repo(data: InputData):
     client = OpenAI()
-
+    i = 0
+    change = ""
     with tempfile.TemporaryDirectory() as tempdir:
         # Step 1: Fetch/clone repo
         repo = Repo.clone_from(data.repoUrl, tempdir)
-
-        # Step 2: Edit repo
-        get_suggestions(client, repo, data.prompt, Path(tempdir))
-        # Step 3: Calculate diff
-        result = get_diff(repo)
-        # TODO actually get unified diff from diff object
-        logger.debug(result)
         # Step 4: Reflection via GPT
+        while i < 3 and not is_change_good(change, data.prompt, client):
+            # Step 2: Edit repo
+            get_suggestions(client, repo, data.prompt, Path(tempdir))
+            # Step 3: Calculate diff
+            change = get_diff(repo)
+            logger.debug(change)
+            reset_repo(repo)
+            i += 1
 
     # Add your code here to process the repoUrl and prompt
 
-    return result
+    return change
 
 
 DEFAULT_REPO = "https://github.com/jayhack/llm.sh"
@@ -196,4 +231,4 @@ Notice that there is no output. Is this supposed to work on Windows also?
 Also it might be great if the script detects which OS or shell I'm using and try to use the appropriate command e.g. dir instead of ls because I don't want to be adding windows after every prompt."""
 
 if __name__ == "__main__":
-    change_repo(InputData(repoUrl=DEFAULT_REPO, prompt=DEFAULT_PROMPT))
+    print(change_repo(InputData(repoUrl=DEFAULT_REPO, prompt=DEFAULT_PROMPT)))
