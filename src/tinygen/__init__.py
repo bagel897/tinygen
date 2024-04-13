@@ -47,7 +47,7 @@ def upload_files(client, files, working_dir: Path):
         content = full_path.read_bytes()
         if len(content) == 0:
             continue
-        logger.debug(f"Uploaded {name}")
+        logger.trace(f"Uploaded {name}")
         yield client.files.create(
             file=(name, content),
             purpose="assistants",
@@ -85,9 +85,9 @@ def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
         #     logger.debug(message)
 
         def on_text_done(self, text: Text) -> None:
-            logger.debug(text)
+            logger.debug(text.value)
             for annotation in text.annotations:
-                logger.debug(annotation)
+                logger.trace(annotation)
                 if annotation.type == "file_path":
                     file_data = client.files.content(annotation.file_path.file_id)
                     logger.debug(file_data)
@@ -109,22 +109,12 @@ def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
                 if tool_call.function.name == "write_file":
                     logger.trace(tool_call.function.arguments)
                     arguments = json.loads(tool_call.function.arguments)
-                    logger.debug(arguments)
+                    logger.trace(arguments)
                     self.write_file(
                         arguments["path"],
                         arguments["content"],
                     )
             return super().on_tool_call_done(tool_call)
-
-        def on_tool_call_delta(self, delta, snapshot):
-            if delta.type == "code_interpreter":
-                if delta.code_interpreter.input:
-                    print(delta.code_interpreter.input, end="", flush=True)
-                if delta.code_interpreter.outputs:
-                    print("\n\noutput >", flush=True)
-                    for output in delta.code_interpreter.outputs:
-                        if output.type == "logs":
-                            print(f"\n{output.logs}", flush=True)
 
         # def on_event(self, event) -> None:
         #     logger.debug(event)
@@ -137,7 +127,7 @@ def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
     assistant = client.beta.assistants.create(
         name="tinygen",
         model=MODEL,
-        instructions=f"Fix the issue specified by the user. Modify the following files: {files}.",
+        instructions=f"Fix the issue specified by the user. Modify the following files: {files}. Make only the necessary changes.",
         tools=[{"type": "code_interpreter"}, TOOLS],
         file_ids=[file.id for file in openai_files],
     )
@@ -167,16 +157,17 @@ def is_change_good(change: str, prompt: str, client: OpenAI) -> bool:
         messages=[
             {
                 "role": "system",
-                "content": "Does the following change fix the issue? Output in JSON with the parameter is_change_good set to true or false.",
+                "content": "Does the following change fix the issue without extra changes? Output in JSON with the parameter is_change_good set to true or false.",
             },
             {"role": "user", "content": f"Change: {change}"},
             {"role": "user", "content": f"Prompt: {prompt}"},
         ],
     )
-    logger.debug(response)
+    logger.trace(response)
     for message in response.choices:
         content = json.loads(message.message.content)
         if "is_change_good" in content:
+            logger.trace(content)
             return content["is_change_good"]
     return False
 
@@ -195,12 +186,12 @@ def change_repo(data: InputData):
         # Step 1: Fetch/clone repo
         repo = Repo.clone_from(data.repoUrl, tempdir)
         # Step 4: Reflection via GPT
-        while i < 3 and not is_change_good(change, data.prompt, client):
+        while i < 6 and not is_change_good(change, data.prompt, client):
             # Step 2: Edit repo
             get_suggestions(client, repo, data.prompt, Path(tempdir))
             # Step 3: Calculate diff
             change = get_diff(repo)
-            logger.debug(change)
+            logger.trace(change)
             reset_repo(repo)
             i += 1
 
