@@ -1,10 +1,16 @@
 from fastapi import FastAPI
-from pydantic import HttpUrl
+from pydantic import BaseModel
 
 app = FastAPI()
 
+
+class InputData(BaseModel):
+    repoUrl: str
+    prompt: str
+
+
 @app.post("/change")
-def change_repo(repoUrl: HttpUrl, prompt: str):
+def change_repo(data: InputData):
     # Step 1: Fetch/clone repo
     # Step 2: Edit repo
     # Step 3: Calculate diff
