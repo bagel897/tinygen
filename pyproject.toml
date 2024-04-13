@@ -5,11 +5,13 @@ description = "Default template for PDM package"
 authors = [
     {name = "Ellen Agarwal", email = "ellenagarwal897@gmail.com"},
 ]
-dependencies = []
+dependencies = [
+    "fastapi>=0.110.1",
+    "uvicorn>=0.29.0",
+]
 requires-python = "==3.12.*"
 readme = "README.md"
 license = {text = "MIT"}
 
-
-[tool.pdm]
-distribution = false
+[tool.pdm.scripts]
+dev = "uvicorn tinygen:app --reload"
