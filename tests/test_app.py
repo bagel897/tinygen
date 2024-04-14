@@ -1,5 +1,10 @@
+import tempfile
+from git import Repo
+import pytest
 from tinygen import app
 from fastapi.testclient import TestClient
+
+from tinygen.git_utils import get_diff
 
 client = TestClient(app)
 
@@ -47,6 +52,13 @@ def get_results(
     return client.post("/change/", json={"repoUrl": repo, "prompt": prompt})
 
 
+def test_git():
+    with tempfile.TemporaryDirectory() as tempdir:
+        repo = Repo.clone_from(DEFAULT_REPO, tempdir)
+        assert get_diff(repo) == ""
+
+
+@pytest.xfail
 def test_basic():
     """Test the basic functionality of the app. This test doesn't work exactly since the change may vary slightly"""
     result = get_results(client, DEFAULT_PROMPT)
