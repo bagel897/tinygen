@@ -13,6 +13,7 @@ pdm install
 
 1. Set the OPENAI_API_KEY either as an environment varible or in the .env file.
 2. `pdm run dev`
+3. (Optional) Set SUPABASE_URL and SUPABASE_KEY to enable supabase
 
 ## Requesting a change
 
