@@ -49,7 +49,7 @@ def get_results(
     prompt: str,
     repo=DEFAULT_REPO,
 ):
-    return client.post("/change/", json={"repoUrl": repo, "prompt": prompt})
+    return client.post("/", json={"repoUrl": repo, "prompt": prompt})
 
 
 def test_git():

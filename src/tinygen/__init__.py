@@ -17,7 +17,7 @@ class InputData(BaseModel):
     prompt: str
 
 
-@app.post("/change")
+@app.post("/")
 def change_repo(data: InputData):
     client = OpenAI()
     i = 0
