@@ -35,6 +35,37 @@ class File:
             self.client.files.delete(self.openai.id)
 
 
+class EventHandler(openai.AssistantEventHandler):
+    def __init__(self, working_dir: Path) -> None:
+        self.working_dir = working_dir
+        super().__init__()
+
+    def on_text_done(self, text) -> None:
+        logger.debug(text.value)
+        return super().on_text_done(text)
+
+    def write_file(self, path, content):
+        full_path = self.working_dir.joinpath(path)
+        if full_path.exists():
+            full_path.write_text(content)
+        return path
+
+    def on_tool_call_done(
+        self,
+        tool_call,
+    ) -> None:
+        if tool_call.type == "function":
+            if tool_call.function.name == "write_file":
+                logger.trace(tool_call.function.arguments)
+                arguments = json.loads(tool_call.function.arguments)
+                logger.trace(arguments)
+                self.write_file(
+                    arguments["path"],
+                    arguments["content"],
+                )
+        return super().on_tool_call_done(tool_call)
+
+
 class Assistant:
     client: OpenAI
 
@@ -75,43 +106,6 @@ class Assistant:
         )
 
     def run_thread(self, prompt: str, working_dir: Path):
-        class EventHandler(openai.AssistantEventHandler):
-            # def on_message_done(self, message):
-            #     logger.debug(message)
-
-            def on_text_done(self, text) -> None:
-                logger.debug(text.value)
-                for annotation in text.annotations:
-                    logger.trace(annotation)
-                    if annotation.type == "file_path":
-                        file_data = self.client.files.content(
-                            annotation.file_path.file_id
-                        )
-                        logger.debug(file_data)
-                        self.write_file(file_data.filename, file_data.read())
-
-                return super().on_text_done(text)
-
-            def write_file(self, path, content):
-                full_path = working_dir.joinpath(path)
-                if full_path.exists():
-                    full_path.write_text(content)
-                return path
-
-            def on_tool_call_done(
-                self,
-                tool_call,
-            ) -> None:
-                if tool_call.type == "function":
-                    if tool_call.function.name == "write_file":
-                        logger.trace(tool_call.function.arguments)
-                        arguments = json.loads(tool_call.function.arguments)
-                        logger.trace(arguments)
-                        self.write_file(
-                            arguments["path"],
-                            arguments["content"],
-                        )
-                return super().on_tool_call_done(tool_call)
 
         thread = self.client.beta.threads.create(
             messages=[
@@ -121,7 +115,7 @@ class Assistant:
         with self.client.beta.threads.runs.stream(
             thread_id=thread.id,
             assistant_id=self.assistant.id,
-            event_handler=EventHandler(),
+            event_handler=EventHandler(working_dir),
         ) as stream:
             stream.until_done()
 
