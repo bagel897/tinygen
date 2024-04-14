@@ -48,6 +48,7 @@ def get_results(
 
 
 def test_basic():
+    """Test the basic functionality of the app. This test doesn't work exactly since the change may vary slightly"""
     result = get_results(client, DEFAULT_PROMPT)
     assert result.status_code == 200
     assert result.json() == EXPECTED_OUTPUT

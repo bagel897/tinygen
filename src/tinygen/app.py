@@ -15,7 +15,7 @@ def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Modifies a file in the repository by writing new content to it.",
+            "description": "Writes a new version of a file in the repository",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -26,7 +26,7 @@ def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
                     },
                     "content": {
                         "type": "string",
-                        "description": "The new content to write to the file",
+                        "description": "The new version of the file",
                     },
                 },
                 "required": ["path", "content"],
@@ -70,19 +70,11 @@ def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
                     )
             return super().on_tool_call_done(tool_call)
 
-        # def on_event(self, event) -> None:
-        #     logger.debug(event)
-        #     return super().on_event(event)
-
-        # @override
-        # def on_text_delta(self, delta, snapshot):
-        #     logger.debug(delta.value)
-
     assistant = client.beta.assistants.create(
         name="tinygen",
         model=MODEL,
-        instructions=f"Fix the issue specified by the user. Modify the following files: {files}. Make only the necessary changes.",
-        tools=[{"type": "code_interpreter"}, TOOLS],
+        instructions=f"You are an assistant who fixes the problem given by the user. You do this by modifiying the following files: {files}. You only make the necessary changes to fix the user's problem and preseve the functionality of the program. You may not ask questions, just make the change.",
+        tools=[{"type": "retrieval"}, TOOLS],
         file_ids=[file.id for file in openai_files],
     )
     try:
@@ -104,6 +96,7 @@ def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
 
 def is_change_good(change: str, prompt: str, client: OpenAI) -> bool:
     if change == "":
+        logger.warning("No change detected")
         return False
     response = client.chat.completions.create(
         model=MODEL,
@@ -111,10 +104,15 @@ def is_change_good(change: str, prompt: str, client: OpenAI) -> bool:
         messages=[
             {
                 "role": "system",
-                "content": "Does the following change fix the issue without extra changes? Output in JSON with the parameter is_change_good set to true or false.",
+                "content": """You are a code reviewer. You determine if the changes are high quality using the following criteria:
+                  1. The changes fix the problem in the prompt.
+                  2. The changes are minimal and do not add or remove unnecessary code.
+                  3. The changes do not break the original program.
+                  4. The code is high quality.
+                Output in JSON with the parameter is_change_good set to true or false. The change is a diff of the code, - for removed lines, + for added lines.""",
             },
             {"role": "user", "content": f"Change: {change}"},
-            {"role": "user", "content": f"Prompt: {prompt}"},
+            {"role": "user", "content": f"Problem: {prompt}"},
         ],
     )
     logger.trace(response)

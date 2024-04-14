@@ -26,14 +26,15 @@ def change_repo(data: InputData):
         # Step 1: Fetch/clone repo
         repo = Repo.clone_from(data.repoUrl, tempdir)
         # Step 4: Reflection via GPT
-        while i < 6 and not is_change_good(change, data.prompt, client):
+        while i < 6 and (i == 0 or not is_change_good(change, data.prompt, client)):
+            i += 1
+            logger.debug(f"Attempt {i}")
             # Step 2: Edit repo
             get_suggestions(client, repo, data.prompt, Path(tempdir))
             # Step 3: Calculate diff
             change = get_diff(repo)
             logger.trace(change)
             reset_repo(repo)
-            i += 1
 
     # Add your code here to process the repoUrl and prompt
 
