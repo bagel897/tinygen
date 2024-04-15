@@ -17,10 +17,10 @@ pdm install
 
 ## Requesting a change
 
-Make a request to [DOMAIN].
+Make a request to the digital ocean endpoint.
 
 ````sh
-curl -H "Content-Type: application/json" -X POST "https://tinygen-vvdvy.ondigitalocean.app/" --data '{"repoUrl":"https://github.com/jayhack/llm.sh", "prompt":"# The program doesn\'t output anything in windows 10"}' | jq --stream | sed "s/\\\n/\n/g"```
+curl -H "Content-Type: application/json" -X POST "https://tinygen-vvdvy.ondigitalocean.app/" --data "{\"repoUrl\":\"https://github.com/jayhack/llm.sh\", \"prompt\":\"# The program doesn't output anything in windows 10\"}"  | jq --stream | sed "s/\\\n/\n/g"
 ````
 
 ## How this works
