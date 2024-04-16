@@ -19,9 +19,9 @@ pdm install
 
 Make a request to the digital ocean endpoint.
 
-````sh
-curl -H "Content-Type: application/json" -X POST "https://tinygen-vvdvy.ondigitalocean.app/" --data "{\"repoUrl\":\"https://github.com/jayhack/llm.sh\", \"prompt\":\"# The program doesn't output anything in windows 10\"}"  | jq --stream | sed "s/\\\n/\n/g"
-````
+```sh
+curl -H "Content-Type: application/json" -X POST "https://tinygen-vvdvy.ondigitalocean.app/" --data @input.json  | jq --stream | sed "s/\\\n/\n/g"
+```
 
 ## How this works
 
