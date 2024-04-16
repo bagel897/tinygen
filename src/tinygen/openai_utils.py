@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from loguru import logger
 import openai
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from tinygen.consts import MODEL
 
@@ -13,9 +13,9 @@ class File:
     path: Path
     name: str
     openai = None
-    client: OpenAI
+    client: AsyncOpenAI
 
-    def __init__(self, path: Path, working_dir: Path, client: OpenAI) -> None:
+    async def init(self, path: Path, working_dir: Path, client: AsyncOpenAI) -> None:
         self.path = path
         self.name = str(path.relative_to(working_dir))
         content = path.read_bytes()
@@ -25,24 +25,24 @@ class File:
         else:
             logger.trace(f"Uploaded {self.name}")
             self.client = client
-            self.openai = client.files.create(
+            self.openai = await client.files.create(
                 file=(self.name, content),
                 purpose="assistants",
             )
 
-    def close(self):
+    async def close(self):
         if self.openai is not None:
-            self.client.files.delete(self.openai.id)
+            await self.client.files.delete(self.openai.id)
 
 
-class EventHandler(openai.AssistantEventHandler):
+class EventHandler(openai.AsyncAssistantEventHandler):
     def __init__(self, working_dir: Path) -> None:
         self.working_dir = working_dir
         super().__init__()
 
-    def on_text_done(self, text) -> None:
+    async def on_text_done(self, text) -> None:
         logger.debug(text.value)
-        return super().on_text_done(text)
+        return await super().on_text_done(text)
 
     def write_file(self, path, content):
         full_path = self.working_dir.joinpath(path)
@@ -50,7 +50,7 @@ class EventHandler(openai.AssistantEventHandler):
             full_path.write_text(content)
         return path
 
-    def on_tool_call_done(
+    async def on_tool_call_done(
         self,
         tool_call,
     ) -> None:
@@ -63,14 +63,14 @@ class EventHandler(openai.AssistantEventHandler):
                     arguments["path"],
                     arguments["content"],
                 )
-        return super().on_tool_call_done(tool_call)
+        return await super().on_tool_call_done(tool_call)
 
 
 class Assistant:
-    client: OpenAI
+    client: AsyncOpenAI
 
-    def __init__(
-        self, name: str, prompt: str, client: OpenAI, files: list[File]
+    async def init(
+        self, name: str, prompt: str, client: AsyncOpenAI, files: list[File]
     ) -> None:
         self.client = client
         TOOLS = {
@@ -97,7 +97,7 @@ class Assistant:
                 },
             },
         }
-        self.assistant = self.client.beta.assistants.create(
+        self.assistant = await self.client.beta.assistants.create(
             name=name,
             model=MODEL,
             instructions=prompt,
@@ -105,19 +105,18 @@ class Assistant:
             file_ids=[file.openai.id for file in files if file.openai is not None],
         )
 
-    def run_thread(self, prompt: str, working_dir: Path):
-
-        thread = self.client.beta.threads.create(
+    async def run_thread(self, prompt: str, working_dir: Path):
+        thread = await self.client.beta.threads.create(
             messages=[
                 {"role": "user", "content": prompt},
             ],
         )
-        with self.client.beta.threads.runs.stream(
+        async with self.client.beta.threads.runs.stream(
             thread_id=thread.id,
             assistant_id=self.assistant.id,
             event_handler=EventHandler(working_dir),
         ) as stream:
-            stream.until_done()
+            await stream.until_done()
 
-    def close(self):
-        self.client.beta.assistants.delete(self.assistant.id)
+    async def close(self):
+        await self.client.beta.assistants.delete(self.assistant.id)

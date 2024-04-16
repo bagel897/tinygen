@@ -2,37 +2,26 @@ import json
 from pathlib import Path
 from git import Repo
 from loguru import logger
-from openai import OpenAI
+from openai import AsyncOpenAI
 from tinygen.consts import MODEL
 from tinygen.git_utils import get_files
-from tinygen.openai_utils import Assistant, File
+from tinygen.openai_utils import File
 
 
-def get_suggestions(client: OpenAI, repo: Repo, prompt: str, working_dir: Path):
-    files = [
-        File(working_dir / path, working_dir, client)
-        for path in get_files(repo.head.commit.tree)
-    ]
-
-    assistant = Assistant(
-        name="tinygen",
-        prompt=f"You are an assistant who fixes the problem given by the user. You do this by modifiying the following files: {(file.name for file in files if file.name is not None)}. You only make the necessary changes to fix the user's problem and preseve the functionality of the program. You may not ask questions, just make the change.",
-        client=client,
-        files=files,
-    )
-    try:
-        assistant.run_thread(prompt, working_dir)
-    finally:
-        assistant.close()
-        for file in files:
-            file.close()
+async def upload_files(client: AsyncOpenAI, repo: Repo, working_dir: Path):
+    files = []
+    for path in get_files(repo.head.commit.tree):
+        file = File()
+        await file.init(working_dir / path, working_dir, client)
+        files.append(file)
+    return files
 
 
-def is_change_good(change: str, prompt: str, client: OpenAI) -> bool:
+async def is_change_good(change: str, prompt: str, client: AsyncOpenAI) -> bool:
     if change == "":
         logger.warning("No change detected")
         return False
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         model=MODEL,
         response_format={"type": "json_object"},
         messages=[
